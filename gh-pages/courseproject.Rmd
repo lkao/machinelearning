@@ -1,0 +1,103 @@
+---
+title: "Practical Machine Learning"
+author: "Lkao"
+output: html_document
+---
+
+**Background - The Aim of this Project**
+
+Using devices such as Jawbone Up, Nike FuelBand and Fitbit, we're able to gather a large amount of workout data. The goal of this project will be to see if we can create a model that, if given new data, is able to predict the manner in which subjects performed certain exercises (the "classe" variable in this dataset), based on results of past measurements.
+
+**Building the Model**
+
+
+After downloading the datasets, we load them into our R client.
+
+```{r}
+library(caret)
+train<-read.csv("pml-training.csv", na.strings=c("", "NA","#DIV/0!"))
+test<-read.csv("pml-testing.csv", na.strings=c("", "NA","#DIV/0!"))
+```
+
+Now we begin the process of preprocessing our data. We're trying to summarize our data into only the relevant variables that might help us create a predictive model of the "classe"" variable. After taking a cursory look at the data, we can surmise that certain data columns will not be relevant to the creation of our model. So we remove those.
+
+```{r}
+train<- train[,-which(names(train) %in% c("user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window", "num_window"))]
+train<-train[,-1]
+```
+
+Now, looking over the data, we see there are numerous columns with a high number of "NA" values. We can't use that type of data in our model, so we'll remove any of the columns that have more than 50% of their values as NA.
+
+```{r}
+train <-train[,colSums(is.na(train))<nrow(train)*0.5]
+```
+
+Then we check the usability of the variables we still have. We first check if there are any variables with a zero (or near zero) variance that may make the model more inaccurate.
+
+````{r}
+nzv <- nearZeroVar(train,saveMetrics=TRUE)
+nzv
+````
+
+It seems like all the variables left don't have a non-zero variance, so there's nothing we need to adjust here.
+
+Then, we can check to see the remaining variables correlate with each other. If they do, it's not a good idea to include both of them in our final model, as that'd be putting 2 very similar variables into the model. Let's set the correlation cutoff at 0.80, and remove any redundant variables.
+
+
+````{r}
+cortrain<-cor(train[,-53])
+cutoff<- findCorrelation(cortrain, cutoff=.8)
+train<- train[,-cutoff]
+````
+
+After completing this, we've preprocessed the data to an acceptable level. We're left with 40 variables as predictors (the 41st being the "classe" variable itself.)
+
+````{r}
+dim(train)
+````
+
+**Model Creation and Cross-Validation**
+
+Now, we'll break up the given training data set into 2, where we can create the model from one set of observations, and then check that model against the 2nd set of observations. This is called cross-validation.
+
+````{r}
+set.seed(12345)
+intrain<-createDataPartition(y=train$classe, p=0.6, list=FALSE)
+train1<-train[intrain,]
+train2<-train[-intrain,]
+````
+
+
+
+Now, we can create our model. There are many Machine Learning techniques to do this, but given the situation and context of this data, I decided to go with a boosting technique. This is because it seems to make intuitive sense: the collection of data we have here is a measurement of different areas of the body during a workout. Each measurement would contribute some (possibly) small factor into the final classification of the workout movement. But the totality of all of the movements should point us in the correct direction. Boosting is taking a variety of different data measurements, figuring out the relative weights of each of them, and applying that type of past knowledge of factors to create a new model. Although I'm sure many other machine learning techniques also may end up as good models, boosting certainly makes a lot of intuitive sense.
+
+```{r,eval=FALSE}
+modFit<- train(classe~., method="gbm", data=train1, verbose=FALSE)
+```
+
+````{r, echo=FALSE}
+modFit= readRDS("modFitgbm.rds")
+````
+
+
+After building our model, let's see how it performs in predicting the subset we set as a test set.
+
+````{r}
+pred<-predict(modFit,train2)
+confusionMatrix(train2$classe,pred)
+````
+
+**Out-of-Range Error Expectations**
+
+Our model seems quite competent with a 95% accuracy rate. This would be about the accuracy rate we could expect for a new out-of-range dataset. Most likely lower than that by a bit, though, because as a general rule, the error rate of our training set tends to be better than out-of-range data, because we could have possibly overfitted. So a range of 93-95% would be reasonable.
+
+**Test Predictions**
+
+Finally, we run the new "test" data through our model. We're left with these answers.
+
+````{r}
+answers<-predict(modFit, test)
+answers
+````
+
+After submitting these answers, our accuracy rate turns out to be 95% (19/20), which turns out to be right around the level of accuracy that we were expecting.
